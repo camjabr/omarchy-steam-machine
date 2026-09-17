@@ -1,4 +1,4 @@
-# omarchy-console-mode
+# omarchy-steam-machine
 
 Turn an Omarchy desktop into something that behaves like a console: press the
 Steam button on a controller and the machine wakes from sleep, powers on the
@@ -38,7 +38,7 @@ Assumes an LG webOS TV and a Valve wireless receiver (USB vendor `28de`).
 ## Install
 
 ```sh
-git clone <this repo> && cd omarchy-console-mode
+git clone <this repo> && cd omarchy-steam-machine
 ./install.sh --passwordless
 $EDITOR ~/.config/console-mode/config.env
 hyprctl reload
