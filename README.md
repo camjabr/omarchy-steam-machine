@@ -38,7 +38,7 @@ Assumes an LG webOS TV and a Valve wireless receiver (USB vendor `28de`).
 ## Install
 
 ```sh
-git clone <this repo> && cd omarchy-steam-machine
+git clone https://github.com/camjabr/omarchy-steam-machine && cd omarchy-steam-machine
 ./install.sh --passwordless
 $EDITOR ~/.config/console-mode/config.env
 hyprctl reload
