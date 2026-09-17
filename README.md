@@ -144,6 +144,15 @@ the controller and your inputs.
 **Cold boot still asks for a password.** This only removes the prompt on
 resume. Autologin is a separate decision and is not configured here.
 
+**Quick Start+ has to be enabled on the TV itself**, under Settings →
+General. It cannot be set over the network on webOS 6: SSAP's
+`settings/getSystemSettings` whitelist refuses to read or write
+`quickStartMode`, and while the `system.notifications/createAlert` luna bridge
+does execute settings writes (verified against `option.audioGuidance`), writes
+return no result, so a rejected key fails silently and unverifiably. Setting
+`quickStartMode` under both the `option` and `general` categories changed
+nothing measurable.
+
 ## Troubleshooting
 
 ```sh
