@@ -166,12 +166,14 @@ set_audio() {
   done < <(pactl list sink-inputs short)
 }
 
-# Only let LG Buddy follow suspend while the TV is in use. Its single sleep/wake
-# policy powers the TV off before sleep and restores it after, so leaving it on
-# in desk mode is what would wake the TV unprompted.
+# LG Buddy's sleep_wake_policy both powers the TV off before sleep *and*
+# restores it after every wake. The restore fights keyboard-wake → desk mode,
+# and the power-off path skips when LG Buddy has no ownership marker (which is
+# how Big Picture suspend left the TV on). Console-mode's session monitor owns
+# both sides instead, so this only ever leaves the policy disabled.
 tv_sleep_policy() {
   have_lg_buddy || return 0
-  lg-buddy settings set system.sleep_wake_policy "$1" >/dev/null 2>&1
+  lg-buddy settings set system.sleep_wake_policy disabled >/dev/null 2>&1
 }
 
 # Gamepad input does not reliably register as desktop activity, so the couch is
@@ -246,7 +248,7 @@ tv() {
   apply_override "$DESK_OUTPUT" "$TV_OUTPUT" "$TV_LABEL" || exit 1
 
   set_audio "$TV_SINK"
-  tv_sleep_policy enabled
+  tv_sleep_policy # keep LG Buddy's auto restore disabled; we own sleep/wake
   idle_policy stay-awake
   notify "$TV_LABEL only"
 }
@@ -264,9 +266,15 @@ desk() {
 
   # Ordered last: Hyprland is already off the TV, so powering it down here
   # cannot strand the session on a display that is going dark.
-  tv_sleep_policy disabled
-  if have_lg_buddy && tv_awake; then
-    lg-buddy power off >/dev/null 2>&1 || notify "Could not power off the $TV_LABEL"
+  tv_sleep_policy
+  if tv_awake; then
+    # Prefer a direct SSAP turnOff: LG Buddy's power-off refuses without an
+    # ownership marker, which is not always present after console-mode use.
+    if command -v tv-power >/dev/null 2>&1; then
+      tv-power off >/dev/null 2>&1 || notify "Could not power off the $TV_LABEL"
+    elif have_lg_buddy; then
+      lg-buddy power off >/dev/null 2>&1 || notify "Could not power off the $TV_LABEL"
+    fi
   fi
 
   notify "$DESK_LABEL only"
@@ -282,7 +290,7 @@ boot() {
 
   write_flag "$TV_OUTPUT" "$DESK_OUTPUT"
   hyprctl reload >/dev/null
-  tv_sleep_policy disabled
+  tv_sleep_policy
 }
 
 reset() {

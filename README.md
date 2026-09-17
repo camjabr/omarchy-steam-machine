@@ -13,6 +13,8 @@ Built for a specific setup, but the hardware specifics live in a config file.
 | Trigger | Behaviour |
 | --- | --- |
 | Steam button while suspended | Wake, TV on, display and audio to TV, Big Picture |
+| Keyboard / mouse / power button while on the TV | Wake to the desk monitor, TV off |
+| Sleep while on the TV | TV powered off before suspend |
 | `SUPER + M` | Toggle desk monitor / TV, audio follows |
 | `SUPER + ALT + G` | Console mode on demand |
 | `SUPER + ALT + B` | Big Picture on the current display, nothing else changes |
@@ -110,12 +112,21 @@ moves when the controller wakes the machine and no other device's does, while a
 keyboard wake moves only the keyboard's. The counter belongs to the puck, so
 **any controller paired to it triggers this equally.**
 
-**Polling beats the logind signal.** Watching `PrepareForSleep` over D-Bus
-looked right, but `dbus-monitor` is refused new-style monitoring under a user
-service and its eavesdrop fallback delivered the pre-sleep signal and never the
-matching resume — so console mode silently never fired. The watcher polls the
-counter instead, which cannot miss the transition because the loop freezes with
-the machine.
+**Polling beats the logind signal for resume.** Watching `PrepareForSleep` over
+D-Bus looked right, but `dbus-monitor` is refused new-style monitoring under a
+user service and its eavesdrop fallback delivered the pre-sleep signal and never
+the matching resume — so console mode silently never fired. The watcher polls
+the counter instead, which cannot miss the transition because the loop freezes
+with the machine. Pre-sleep TV power-off still uses the PrepareForSleep *true*
+signal (which eavesdrop does deliver), held open with a logind delay inhibitor
+so the call finishes before the network drops.
+
+**LG Buddy's sleep_wake_policy is left disabled.** When enabled it restores the
+TV after every wake — including keyboard — which fights desk-mode resume. Its
+`power off` path also skips when it has no screen-ownership marker, which is how
+sleeping from Steam Big Picture left the panel on. Console-mode therefore sends
+`ssap://system/turnOff` itself before suspend, and only powers the TV back on
+when entering console mode.
 
 **A running Steam ignores `-gamepadui`.** Worse, closing the Big Picture window
 leaves Steam alive with no window at all, so relaunching does nothing visible.

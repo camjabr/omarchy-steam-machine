@@ -1,0 +1,62 @@
+#!/bin/bash
+
+# TV power helpers that talk to webOS directly.
+#
+# LG Buddy's `power off` refuses when it does not hold a screen-ownership
+# marker, which is exactly the state Steam Big Picture suspend left us in.
+# ssap://system/turnOff does not care about that marker.
+
+set -uo pipefail
+
+SCRIPT_CANDIDATES=(
+  "${CONSOLE_MODE_LIB:-/nonexistent}/tv_ssap.py"
+  "${XDG_DATA_HOME:-$HOME/.local/share}/console-mode/tv_ssap.py"
+  "$(dirname "$(readlink -f "$0")")/../lib/tv_ssap.py"
+)
+
+PYTHON_CANDIDATES=(
+  "${CONSOLE_MODE_PYTHON:-}"
+  /usr/bin/LG_Buddy_PIP/bin/python
+  python3
+)
+
+usage() {
+  echo "Usage: $(basename "$0") {off|on|state}" >&2
+  exit 1
+}
+
+[[ $# -ge 1 ]] || usage
+cmd=$1
+
+script=""
+for candidate in "${SCRIPT_CANDIDATES[@]}"; do
+  if [[ -r $candidate ]]; then
+    script="$candidate"
+    break
+  fi
+done
+
+if [[ -z $script ]]; then
+  echo "tv-power: cannot find tv_ssap.py" >&2
+  exit 1
+fi
+
+python=""
+for candidate in "${PYTHON_CANDIDATES[@]}"; do
+  [[ -n $candidate ]] || continue
+  command -v "$candidate" >/dev/null 2>&1 || continue
+  if "$candidate" -c "import websockets" 2>/dev/null; then
+    python=$candidate
+    break
+  fi
+done
+
+if [[ -z $python ]]; then
+  echo "tv-power: no Python with the websockets module found" >&2
+  exit 1
+fi
+
+case $cmd in
+  off | on | state) exec "$python" "$script" "$cmd" ;;
+  *) usage ;;
+esac

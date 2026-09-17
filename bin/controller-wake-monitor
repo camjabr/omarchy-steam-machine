@@ -1,37 +1,36 @@
 #!/bin/bash
 
-# Enter console mode when a Steam Controller wakes the machine.
+# Console-mode session monitor.
 #
-# The wireless puck cannot be detected by enumeration: it presents four static
-# slots whether or not a controller is connected, so powering a controller on
-# adds no device and fires no udev event. What the kernel does expose is the
-# puck's wakeup source counter, which advances when the puck signals a remote
-# wakeup, and no other device's counter moves when the controller is what woke
-# us. The counter belongs to the puck, so any controller paired to it triggers
-# this equally.
+# 1. Before sleep: if the session is on the TV, power the TV off. Done with a
+#    logind delay inhibitor so the call finishes before the network drops.
+#    LG Buddy's own sleep_wake_policy is left disabled: when enabled it also
+#    restores the TV after *every* wake, including keyboard, which fights the
+#    desk-mode path below. Its power-off path also skips when it does not own
+#    a screen marker, which is how Big Picture suspend left the TV on.
 #
-# That counter only moves when the machine was asleep. The puck's runtime power
-# management is off (power/control reads "on"), so it never autosuspends and
-# therefore never needs to signal while the system is awake. Connecting a
-# controller at the desk is consequently invisible here; that case is served by
-# the console-mode and big-picture keybindings instead.
+# 2. After resume: the Steam Controller puck's wakeup counter says whether the
+#    controller woke us. If it did, enter console mode. If anything else woke
+#    us (keyboard, mouse, power button) while we were on the TV, switch back
+#    to the desk monitor.
 #
-# This polls rather than watching logind's PrepareForSleep signal, because
-# dbus-monitor is commonly refused new-style monitoring and its eavesdrop
-# fallback delivered the pre-sleep signal but never the matching resume.
-# Polling cannot miss the transition: the loop simply freezes with the machine.
+# The poll loop freezes with the machine and cannot miss a resume. PrepareForSleep
+# false is not relied on: dbus-monitor's eavesdrop fallback has been observed to
+# drop the resume signal, so the inhibitor is reacquired from the poll gap.
 
 set -uo pipefail
 
-# Valve's USB vendor ID. Matching the vendor rather than one product ID keeps
-# this working across puck revisions.
+CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}/console-mode/config.env"
+if [[ -r $CONFIG ]]; then
+  # shellcheck source=/dev/null
+  source "$CONFIG"
+fi
+
 VENDOR="${CONTROLLER_VENDOR:-28de}"
-
 INTERVAL="${POLL_INTERVAL:-2}"
-
-# Floor on how often we may act. Guards against a controller that repeatedly
-# re-arms the wakeup source turning into a launch loop.
 COOLDOWN="${COOLDOWN:-30}"
+# A gap this far above INTERVAL can only mean the loop was frozen in suspend.
+RESUME_GAP="${RESUME_GAP:-8}"
 
 log() {
   printf '%s\n' "$*"
@@ -52,45 +51,158 @@ puck_dir() {
   return 1
 }
 
-wake_count() {
+puck_count() {
   local dir
   dir=$(puck_dir) || return 1
   cat "$dir/power/wakeup_active_count" 2>/dev/null
 }
 
-last=$(wake_count) || last=0
+# Power the TV off without going through LG Buddy's ownership gate.
+# ssap://system/turnOff works whenever the panel is reachable.
+power_off_tv() {
+  if command -v tv-power >/dev/null 2>&1; then
+    tv-power off
+    return $?
+  fi
+  # Fallback if the helper is not on PATH yet.
+  lg-buddy power off >/dev/null 2>&1
+}
+
+# --- sleep delay inhibitor ---------------------------------------------------
+
+INHIBIT_PID=
+
+hold_inhibit() {
+  [[ -n ${INHIBIT_PID:-} ]] && kill -0 "$INHIBIT_PID" 2>/dev/null && return 0
+  systemd-inhibit \
+    --what=sleep \
+    --mode=delay \
+    --who=console-mode \
+    --why="Power off the TV before suspend" \
+    sleep infinity &
+  INHIBIT_PID=$!
+  log "holding sleep delay inhibitor (pid $INHIBIT_PID)"
+}
+
+release_inhibit() {
+  local pid=${INHIBIT_PID:-}
+  INHIBIT_PID=
+  [[ -n $pid ]] || return 0
+  kill "$pid" 2>/dev/null || true
+  wait "$pid" 2>/dev/null || true
+  log "released sleep delay inhibitor"
+}
+
+on_prepare_sleep() {
+  local mode
+  mode=$(toggle-monitor mode 2>/dev/null || echo none)
+  if [[ $mode == tv ]]; then
+    log "pre-sleep: session is on the TV, powering it off"
+    power_off_tv || log "pre-sleep: TV power-off failed (may already be off)"
+  else
+    log "pre-sleep: session is on the desk, leaving the TV alone"
+  fi
+  # Let logind proceed with suspend.
+  release_inhibit
+}
+
+# dbus-monitor eavesdrop delivers PrepareForSleep true reliably; false often
+# does not arrive, so resume reacquisition is handled by the poll loop.
+watch_sleep() {
+  local line
+  while IFS= read -r line; do
+    case $line in
+      *"boolean true"*) on_prepare_sleep ;;
+      *"boolean false"*) hold_inhibit ;;
+    esac
+  done < <(
+    dbus-monitor --system \
+      "type='signal',sender='org.freedesktop.login1',interface='org.freedesktop.login1.Manager',member='PrepareForSleep'"
+  )
+}
+
+cleanup() {
+  release_inhibit
+  [[ -n ${SLEEP_WATCHER_PID:-} ]] && kill "$SLEEP_WATCHER_PID" 2>/dev/null || true
+}
+trap cleanup EXIT
+
+hold_inhibit
+watch_sleep &
+SLEEP_WATCHER_PID=$!
+
+# --- resume / wake source poll ----------------------------------------------
+
+last=$(puck_count) || last=0
 last_action=0
-log "watching puck wakeup counter (start=$last)"
+previous=$(now_epoch)
+log "watching wakes (puck start=$last, resume gap=${RESUME_GAP}s)"
 
 while :; do
   sleep "$INTERVAL"
 
   moment=$(now_epoch)
+  gap=$((moment - previous))
+  previous=$moment
 
-  count=$(wake_count) || continue
+  count=$(puck_count) || continue
   [[ -n $count ]] || continue
 
-  # A reset counter means the puck was re-enumerated, not that it signalled.
   if ((count < last)); then
     last=$count
     continue
   fi
 
-  ((count > last)) || continue
-  log "puck signalled ($last -> $count)"
-  last=$count
+  # Awake path: only track the counter. Actions wait for a real resume so a
+  # spurious increment cannot yank the session onto the TV mid-afternoon.
+  if ((gap < RESUME_GAP)); then
+    if ((count > last)); then
+      log "puck signalled while awake ($last -> $count), ignoring"
+      last=$count
+    fi
+    continue
+  fi
+
+  # Resumed. Reacquire the inhibitor if PrepareForSleep false was dropped, and
+  # give USB wakeup accounting a moment before deciding who woke us — the puck
+  # counter can lag the poll thaw by a beat and would otherwise look like a
+  # keyboard wake.
+  hold_inhibit
+  sleep 1
+  count=$(puck_count) || count=$last
+  moment=$(now_epoch)
+
+  puck_woke=0
+  if ((count > last)); then
+    log "puck signalled ($last -> $count)"
+    last=$count
+    puck_woke=1
+  fi
 
   if ((moment - last_action < COOLDOWN)); then
-    log "within cooldown, skipping"
-    continue
-  fi
-  last_action=$moment
-
-  if [[ $(toggle-monitor mode 2>/dev/null) == tv ]]; then
-    log "already in console mode, nothing to do"
+    log "within cooldown after ${gap}s resume, skipping"
     continue
   fi
 
-  log "entering console mode"
-  console-mode
+  mode=$(toggle-monitor mode 2>/dev/null || echo none)
+
+  if ((puck_woke)); then
+    if [[ $mode == tv ]]; then
+      log "controller wake after ${gap}s, already in console mode"
+      continue
+    fi
+    last_action=$moment
+    log "controller wake after ${gap}s, entering console mode"
+    console-mode
+    continue
+  fi
+
+  # Non-controller wake: keyboard, mouse, power button, lid, etc.
+  if [[ $mode == tv ]]; then
+    last_action=$moment
+    log "non-controller wake after ${gap}s, returning to desk"
+    toggle-monitor desk
+  else
+    log "non-controller wake after ${gap}s, already on desk"
+  fi
 done

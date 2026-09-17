@@ -69,7 +69,8 @@ for script in "$REPO"/bin/*; do
   note "$(basename "$script")"
 done
 install -m 644 "$REPO/lib/tv_power_state.py" "$LIB_DIR/"
-note "tv_power_state.py -> $LIB_DIR"
+install -m 644 "$REPO/lib/tv_ssap.py" "$LIB_DIR/"
+note "tv_power_state.py, tv_ssap.py -> $LIB_DIR"
 
 case ":$PATH:" in
   *":$BIN_DIR:"*) ;;
@@ -141,7 +142,8 @@ step "Installing user service"
 install -d "$UNIT_DIR"
 install -m 644 "$REPO/systemd/user/controller-wake.service" "$UNIT_DIR/"
 systemctl --user daemon-reload
-systemctl --user enable --now controller-wake.service
+systemctl --user enable controller-wake.service
+systemctl --user restart controller-wake.service
 note "controller-wake.service: $(systemctl --user is-active controller-wake.service)"
 
 # --- optional: passwordless resume -------------------------------------------

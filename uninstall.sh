@@ -38,7 +38,7 @@ systemctl --user daemon-reload
 note "controller-wake.service removed"
 
 step "Removing scripts"
-for name in toggle-monitor console-mode big-picture controller-wake-monitor tv-power-state; do
+for name in toggle-monitor console-mode big-picture controller-wake-monitor tv-power-state tv-power; do
   rm -f "$BIN_DIR/$name"
   note "$name"
 done
