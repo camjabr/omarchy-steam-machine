@@ -1,0 +1,50 @@
+#!/bin/sh
+# Power off the TV before NetworkManager tears the network down for sleep.
+#
+# User-session PrepareForSleep handlers race NetworkManager and lose: by the
+# time they run, the Wi-Fi interface is already deactivating and SSAP returns
+# "Network is unreachable". Scripts in this pre-down.d directory are
+# synchronous — NM waits for them to finish before taking the interface down,
+# which is the same trick LG Buddy uses for its own sleep rail.
+#
+# Only acts when logind is actually preparing for sleep (so an ordinary cable
+# yank does not kill the TV), and only when console-mode has the session on
+# the TV.
+
+set -eu
+
+[ "${2:-}" = "pre-down" ] || exit 0
+
+case "$(busctl get-property org.freedesktop.login1 /org/freedesktop/login1 org.freedesktop.login1.Manager PreparingForSleep 2>/dev/null || true)" in
+  *true*) ;;
+  *) exit 0 ;;
+esac
+
+logger -t console-mode "NM pre-down: system preparing for sleep"
+
+for mode_file in /home/*/.local/state/console-mode/mode; do
+  [ -f "$mode_file" ] || continue
+  [ "$(cat "$mode_file")" = "tv" ] || continue
+
+  user=$(printf '%s\n' "$mode_file" | cut -d/ -f3)
+  home="/home/$user"
+  tv_power="$home/.local/bin/tv-power"
+  [ -x "$tv_power" ] || continue
+
+  uid=$(id -u "$user")
+  logger -t console-mode "NM pre-down: powering off TV for user $user"
+
+  if runuser -u "$user" -- env \
+    HOME="$home" \
+    USER="$user" \
+    LOGNAME="$user" \
+    XDG_RUNTIME_DIR="/run/user/$uid" \
+    PATH="$home/.local/bin:/usr/bin:/bin" \
+    "$tv_power" off; then
+    logger -t console-mode "NM pre-down: TV powered off"
+  else
+    logger -t console-mode "NM pre-down: TV power-off failed (exit $?)"
+  fi
+done
+
+exit 0

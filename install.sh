@@ -2,9 +2,9 @@
 
 # Install console mode onto this machine.
 #
-#   ./install.sh                 scripts, service, udev rule, Hyprland config
+#   ./install.sh                 scripts, service, udev + NM hooks, Hyprland config
 #   ./install.sh --passwordless  also remove the password prompt on resume
-#   ./install.sh --skip-udev     leave /etc alone (no sudo needed)
+#   ./install.sh --skip-udev     leave /etc alone (no sudo; no controller wake, no sleep TV-off)
 
 set -euo pipefail
 
@@ -18,6 +18,7 @@ HYPR_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/hypr"
 HOOK_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/omarchy/hooks/post-boot.d"
 SHELL_JSON="${XDG_CONFIG_HOME:-$HOME/.config}/omarchy/shell.json"
 UDEV_RULE=/etc/udev/rules.d/90-steam-controller-wake.rules
+NM_PRE_DOWN=/etc/NetworkManager/dispatcher.d/pre-down.d/console-mode-tv-off
 
 passwordless=false
 skip_udev=false
@@ -117,11 +118,12 @@ if command -v omarchy >/dev/null 2>&1; then
   note "toggle-monitor-boot -> $HOOK_DIR"
 fi
 
-# --- udev --------------------------------------------------------------------
+# --- system hooks (udev + NetworkManager) ------------------------------------
 
 if $skip_udev; then
-  step "Skipping udev rule (--skip-udev)"
-  note "the controller will not wake the machine without it"
+  step "Skipping system hooks (--skip-udev)"
+  note "the controller will not wake the machine without the udev rule"
+  note "sleeping from the TV will not power it off without the NM pre-down hook"
 else
   step "Installing udev rule (needs sudo)"
   sudo install -m 644 -o root -g root "$REPO/udev/90-steam-controller-wake.rules" "$UDEV_RULE"
@@ -134,6 +136,14 @@ else
     [[ $(cat "$dir/idVendor" 2>/dev/null) == 28de ]] || continue
     note "$(basename "$dir") ($(cat "$dir/product" 2>/dev/null)): wakeup=$(cat "$dir/power/wakeup" 2>/dev/null)"
   done
+
+  step "Installing NetworkManager pre-down hook (needs sudo)"
+  # Synchronous: NM waits for this before tearing the interface down, which is
+  # the only window where SSAP can still reach the TV during sleep prep.
+  sudo install -d -m 755 /etc/NetworkManager/dispatcher.d/pre-down.d
+  sudo install -m 755 -o root -g root \
+    "$REPO/networkmanager/pre-down.d/console-mode-tv-off" "$NM_PRE_DOWN"
+  note "installed $NM_PRE_DOWN"
 fi
 
 # --- service -----------------------------------------------------------------

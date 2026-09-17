@@ -42,6 +42,10 @@ TV_WAIT_SECONDS="${TV_WAIT_SECONDS:-30}"
 MONITOR_WAIT_SECONDS="${MONITOR_WAIT_SECONDS:-12}"
 
 FLAG_FILE="${FLAG_FILE:-$HOME/.local/state/omarchy/toggles/hypr/monitor-toggle.lua}"
+# Read by the NetworkManager pre-down hook (as root) to decide whether sleep
+# should power the TV off. Kept next to other console-mode state, not in the
+# Hyprland toggles tree, so a deleted Lua override cannot leave the hook blind.
+MODE_FILE="${MODE_FILE:-$HOME/.local/state/console-mode/mode}"
 
 if [[ -z $DESK_OUTPUT || -z $TV_OUTPUT ]]; then
   echo "toggle-monitor: set DESK_OUTPUT and TV_OUTPUT in $CONFIG" >&2
@@ -135,6 +139,13 @@ if connected(require_connected) then
   hl.monitor({ output = disable, disabled = true })
 end
 LUA
+}
+
+# Companion to write_flag for the NetworkManager sleep hook, which cannot
+# usefully parse the Lua override.
+write_mode() {
+  mkdir -p "$(dirname "$MODE_FILE")"
+  printf '%s\n' "$1" >"$MODE_FILE"
 }
 
 sink_present() {
@@ -246,6 +257,7 @@ tv() {
   fi
 
   apply_override "$DESK_OUTPUT" "$TV_OUTPUT" "$TV_LABEL" || exit 1
+  write_mode tv
 
   set_audio "$TV_SINK"
   tv_sleep_policy # keep LG Buddy's auto restore disabled; we own sleep/wake
@@ -260,6 +272,7 @@ desk() {
   fi
 
   apply_override "$TV_OUTPUT" "$DESK_OUTPUT" "$DESK_LABEL" || exit 1
+  write_mode desk
 
   set_audio "$DESK_SINK"
   idle_policy allow-idle
@@ -289,12 +302,14 @@ boot() {
   tv_awake && return 0
 
   write_flag "$TV_OUTPUT" "$DESK_OUTPUT"
+  write_mode desk
   hyprctl reload >/dev/null
   tv_sleep_policy
 }
 
 reset() {
   rm -f "$FLAG_FILE"
+  write_mode none
   hyprctl reload >/dev/null
   notify "All displays enabled"
 }

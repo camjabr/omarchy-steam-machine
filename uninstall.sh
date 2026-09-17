@@ -14,7 +14,9 @@ UNIT_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
 HYPR_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/hypr"
 HOOK_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/omarchy/hooks/post-boot.d"
 FLAG_FILE="$HOME/.local/state/omarchy/toggles/hypr/monitor-toggle.lua"
+MODE_FILE="$HOME/.local/state/console-mode/mode"
 UDEV_RULE=/etc/udev/rules.d/90-steam-controller-wake.rules
+NM_PRE_DOWN=/etc/NetworkManager/dispatcher.d/pre-down.d/console-mode-tv-off
 
 keep_config=false
 [[ ${1:-} == --keep-config ]] && keep_config=true
@@ -30,6 +32,7 @@ if [[ -f $FLAG_FILE ]]; then
   hyprctl reload >/dev/null 2>&1 || true
   note "removed monitor override"
 fi
+rm -f "$MODE_FILE"
 
 step "Stopping service"
 systemctl --user disable --now controller-wake.service 2>/dev/null || true
@@ -59,6 +62,12 @@ if [[ -e $UDEV_RULE ]]; then
   sudo udevadm control --reload-rules
   note "removed $UDEV_RULE"
   note "note: Steam's own 60-steam-input.rules may still enable controller wakeup"
+fi
+
+if [[ -e $NM_PRE_DOWN ]]; then
+  step "Removing NetworkManager pre-down hook (needs sudo)"
+  sudo rm -f "$NM_PRE_DOWN"
+  note "removed $NM_PRE_DOWN"
 fi
 
 if ! $keep_config; then

@@ -1,5 +1,5 @@
 [Unit]
-Description=Console mode sleep/wake: TV power-off on sleep, desk or Big Picture on resume
+Description=Console mode wake: desk or Big Picture depending on who woke the machine
 # The monitor calls into the running session, so wait until UWSM has imported
 # WAYLAND_DISPLAY. Mirrors Omarchy's own sleep hook ordering.
 After=dbus.socket wayland-session-waitenv.service

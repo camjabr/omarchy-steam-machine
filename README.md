@@ -117,17 +117,21 @@ D-Bus looked right, but `dbus-monitor` is refused new-style monitoring under a
 user service and its eavesdrop fallback delivered the pre-sleep signal and never
 the matching resume — so console mode silently never fired. The watcher polls
 the counter instead, which cannot miss the transition because the loop freezes
-with the machine. Pre-sleep TV power-off still uses the PrepareForSleep *true*
-signal (which eavesdrop does deliver), held open with a logind delay inhibitor
-so the call finishes before the network drops.
+with the machine.
+
+**TV power-off before sleep needs a NetworkManager pre-down hook.** A
+user-session PrepareForSleep handler races NM and loses: by the time SSAP runs,
+Wi-Fi is already deactivating (`Network is unreachable`). Scripts under
+`/etc/NetworkManager/dispatcher.d/pre-down.d/` are synchronous — NM waits for
+them before tearing the interface down — which is the same window LG Buddy uses
+for its own sleep rail. The hook only fires when logind's `PreparingForSleep`
+is true, so an ordinary cable yank does not kill the TV.
 
 **LG Buddy's sleep_wake_policy is left disabled.** When enabled it restores the
 TV after every wake — including keyboard — which fights desk-mode resume. Its
-`power off` path also skips when it has no screen-ownership marker, which is how
-sleeping from Steam Big Picture left the panel on. Console-mode therefore sends
-`ssap://system/turnOff` itself before suspend, and only powers the TV back on
-when entering console mode.
-
+`power off` path also skips when it has no screen-ownership marker. Console-mode
+therefore sends `ssap://system/turnOff` itself from the NM hook, and only powers
+the TV back on when entering console mode.
 **A running Steam ignores `-gamepadui`.** Worse, closing the Big Picture window
 leaves Steam alive with no window at all, so relaunching does nothing visible.
 `steam steam://open/bigpicture` is what reopens it. Big Picture also maps as an
