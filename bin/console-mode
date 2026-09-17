@@ -1,0 +1,26 @@
+#!/bin/bash
+
+# Put the machine into console mode: picture and sound on the TV, Steam Big
+# Picture in front. Safe to run when already in console mode.
+
+set -uo pipefail
+
+notify() {
+  omarchy-notification-send -g 󰊴 "$1" 2>/dev/null || echo "$1"
+}
+
+# Waking the TV takes seconds, and a second trigger can easily arrive inside
+# that window: a controller connecting, then the machine suspending and waking.
+# Two overlapping switches fight over the display, so the later one stands down.
+exec 9>"${XDG_RUNTIME_DIR:-/tmp}/console-mode.lock"
+flock -n 9 || exit 0
+
+# A TV that will not come up is not a reason to do nothing: landing in Big
+# Picture on the desk monitor is still what was asked for.
+if ! toggle-monitor tv; then
+  notify "TV unavailable, starting Big Picture on the desk monitor"
+fi
+
+big-picture
+
+exit 0

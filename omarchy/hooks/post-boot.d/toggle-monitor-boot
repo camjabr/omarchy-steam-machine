@@ -1,0 +1,6 @@
+#!/bin/bash
+# Reassert the desk monitor at login unless the TV is actually awake.
+#
+# An LG OLED keeps its DisplayPort link up in standby, so without this the
+# session can start owned by a display that is switched off.
+exec toggle-monitor boot

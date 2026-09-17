@@ -1,0 +1,47 @@
+#!/bin/bash
+
+# Print the TV's real power state by asking webOS, one word on stdout.
+#
+# The interpreter is resolved at run time rather than baked into a shebang.
+# The query needs the websockets module, which system Python usually lacks
+# while LG Buddy ships a virtualenv that has it; resolving late means an
+# LG Buddy update cannot leave a stale path behind.
+
+set -uo pipefail
+
+SCRIPT_CANDIDATES=(
+  "${CONSOLE_MODE_LIB:-/nonexistent}/tv_power_state.py"
+  "${XDG_DATA_HOME:-$HOME/.local/share}/console-mode/tv_power_state.py"
+  "$(dirname "$(readlink -f "$0")")/../lib/tv_power_state.py"
+)
+
+PYTHON_CANDIDATES=(
+  "${CONSOLE_MODE_PYTHON:-}"
+  /usr/bin/LG_Buddy_PIP/bin/python
+  python3
+)
+
+script=""
+for candidate in "${SCRIPT_CANDIDATES[@]}"; do
+  if [[ -r $candidate ]]; then
+    script="$candidate"
+    break
+  fi
+done
+
+if [[ -z $script ]]; then
+  echo "tv-power-state: cannot find tv_power_state.py" >&2
+  exit 1
+fi
+
+for candidate in "${PYTHON_CANDIDATES[@]}"; do
+  [[ -n $candidate ]] || continue
+  command -v "$candidate" >/dev/null 2>&1 || continue
+  if "$candidate" -c "import websockets" 2>/dev/null; then
+    exec "$candidate" "$script" "$@"
+  fi
+done
+
+echo "tv-power-state: no Python with the websockets module found" >&2
+echo "tv-power-state: install LG Buddy, or pip install websockets and set CONSOLE_MODE_PYTHON" >&2
+exit 1

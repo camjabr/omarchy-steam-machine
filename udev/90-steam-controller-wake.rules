@@ -1,0 +1,9 @@
+# Let Valve wireless receivers wake the machine from suspend.
+#
+# The puck advertises USB remote wakeup (bmAttributes 0xa0) but the kernel
+# leaves it disabled by default, and the sysfs value does not survive a reboot.
+#
+# Recent Steam packages ship an equivalent rule in
+# /usr/lib/udev/rules.d/60-steam-input.rules. This one makes the behaviour
+# independent of that package's contents.
+ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="28de", ATTR{power/wakeup}=="*", ATTR{power/wakeup}="enabled"

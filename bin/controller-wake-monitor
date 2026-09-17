@@ -1,0 +1,96 @@
+#!/bin/bash
+
+# Enter console mode when a Steam Controller wakes the machine.
+#
+# The wireless puck cannot be detected by enumeration: it presents four static
+# slots whether or not a controller is connected, so powering a controller on
+# adds no device and fires no udev event. What the kernel does expose is the
+# puck's wakeup source counter, which advances when the puck signals a remote
+# wakeup, and no other device's counter moves when the controller is what woke
+# us. The counter belongs to the puck, so any controller paired to it triggers
+# this equally.
+#
+# That counter only moves when the machine was asleep. The puck's runtime power
+# management is off (power/control reads "on"), so it never autosuspends and
+# therefore never needs to signal while the system is awake. Connecting a
+# controller at the desk is consequently invisible here; that case is served by
+# the console-mode and big-picture keybindings instead.
+#
+# This polls rather than watching logind's PrepareForSleep signal, because
+# dbus-monitor is commonly refused new-style monitoring and its eavesdrop
+# fallback delivered the pre-sleep signal but never the matching resume.
+# Polling cannot miss the transition: the loop simply freezes with the machine.
+
+set -uo pipefail
+
+# Valve's USB vendor ID. Matching the vendor rather than one product ID keeps
+# this working across puck revisions.
+VENDOR="${CONTROLLER_VENDOR:-28de}"
+
+INTERVAL="${POLL_INTERVAL:-2}"
+
+# Floor on how often we may act. Guards against a controller that repeatedly
+# re-arms the wakeup source turning into a launch loop.
+COOLDOWN="${COOLDOWN:-30}"
+
+log() {
+  printf '%s\n' "$*"
+}
+
+now_epoch() {
+  printf '%(%s)T' -1
+}
+
+puck_dir() {
+  local dir
+  for dir in /sys/bus/usb/devices/*/; do
+    [[ $(cat "$dir/idVendor" 2>/dev/null) == "$VENDOR" ]] || continue
+    [[ -r "$dir/power/wakeup_active_count" ]] || continue
+    printf '%s\n' "$dir"
+    return 0
+  done
+  return 1
+}
+
+wake_count() {
+  local dir
+  dir=$(puck_dir) || return 1
+  cat "$dir/power/wakeup_active_count" 2>/dev/null
+}
+
+last=$(wake_count) || last=0
+last_action=0
+log "watching puck wakeup counter (start=$last)"
+
+while :; do
+  sleep "$INTERVAL"
+
+  moment=$(now_epoch)
+
+  count=$(wake_count) || continue
+  [[ -n $count ]] || continue
+
+  # A reset counter means the puck was re-enumerated, not that it signalled.
+  if ((count < last)); then
+    last=$count
+    continue
+  fi
+
+  ((count > last)) || continue
+  log "puck signalled ($last -> $count)"
+  last=$count
+
+  if ((moment - last_action < COOLDOWN)); then
+    log "within cooldown, skipping"
+    continue
+  fi
+  last_action=$moment
+
+  if [[ $(toggle-monitor mode 2>/dev/null) == tv ]]; then
+    log "already in console mode, nothing to do"
+    continue
+  fi
+
+  log "entering console mode"
+  console-mode
+done

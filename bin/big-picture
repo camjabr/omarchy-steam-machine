@@ -1,0 +1,18 @@
+#!/bin/bash
+
+# Open Steam Big Picture, leaving the display setup alone.
+
+set -uo pipefail
+
+# A Steam that is already running ignores -gamepadui, and closing the Big
+# Picture window leaves Steam alive with no window at all, so relaunching does
+# nothing visible. The URL handler is what reopens it.
+if pgrep -x steam >/dev/null 2>&1; then
+  steam steam://open/bigpicture >/dev/null 2>&1 &
+elif command -v uwsm-app >/dev/null 2>&1; then
+  uwsm-app -- steam -gamepadui >/dev/null 2>&1 &
+else
+  steam -gamepadui >/dev/null 2>&1 &
+fi
+
+exit 0

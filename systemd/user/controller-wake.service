@@ -1,0 +1,17 @@
+[Unit]
+Description=Enter console mode when the Steam Controller wakes the machine
+# The monitor calls into the running session, so wait until UWSM has imported
+# WAYLAND_DISPLAY. Mirrors Omarchy's own sleep hook ordering.
+After=dbus.socket wayland-session-waitenv.service
+Requires=dbus.socket
+PartOf=graphical-session.target
+ConditionEnvironment=WAYLAND_DISPLAY
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/controller-wake-monitor
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=graphical-session.target
