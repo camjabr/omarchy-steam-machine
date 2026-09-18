@@ -17,6 +17,8 @@ FLAG_FILE="$HOME/.local/state/omarchy/toggles/hypr/monitor-toggle.lua"
 MODE_FILE="$HOME/.local/state/console-mode/mode"
 UDEV_RULE=/etc/udev/rules.d/90-steam-controller-wake.rules
 NM_PRE_DOWN=/etc/NetworkManager/dispatcher.d/pre-down.d/console-mode-tv-off
+TV_SLEEP_MONITOR=/usr/local/lib/console-mode/tv-sleep-monitor.py
+TV_SLEEP_SERVICE=/etc/systemd/system/console-mode-tv-sleep.service
 
 keep_config=false
 [[ ${1:-} == --keep-config ]] && keep_config=true
@@ -68,6 +70,15 @@ if [[ -e $NM_PRE_DOWN ]]; then
   step "Removing NetworkManager pre-down hook (needs sudo)"
   sudo rm -f "$NM_PRE_DOWN"
   note "removed $NM_PRE_DOWN"
+fi
+
+if [[ -e $TV_SLEEP_SERVICE || -e $TV_SLEEP_MONITOR ]]; then
+  step "Removing system Suspend watcher (needs sudo)"
+  sudo systemctl disable --now console-mode-tv-sleep.service 2>/dev/null || true
+  sudo rm -f "$TV_SLEEP_SERVICE" "$TV_SLEEP_MONITOR"
+  sudo rmdir /usr/local/lib/console-mode 2>/dev/null || true
+  sudo systemctl daemon-reload
+  note "removed console-mode-tv-sleep"
 fi
 
 if ! $keep_config; then

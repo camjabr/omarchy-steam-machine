@@ -119,20 +119,18 @@ the matching resume — so console mode silently never fired. The watcher polls
 the counter instead, which cannot miss the transition because the loop freezes
 with the machine.
 
-**TV power-off before sleep needs a NetworkManager pre-down hook.** A
-user-session PrepareForSleep handler races NM and loses: by the time SSAP runs,
-Wi-Fi is already deactivating (`Network is unreachable`). Scripts under
-`/etc/NetworkManager/dispatcher.d/pre-down.d/` are synchronous — NM waits for
-them before tearing the interface down — which is the same window LG Buddy uses
-for its own sleep rail. The hook only fires when logind's `PreparingForSleep`
-is true, so an ordinary cable yank does not kill the TV.
-
+**TV power-off before sleep watches the logind Suspend method call as root,
+over a pre-warmed SSAP socket.** User-session PrepareForSleep handlers and NM
+`pre-down.d` both lose the race on Wi-Fi: by the time they run, IPv4 routes are
+already gone. A cold SSAP connect at Suspend time loses too. BecomeMonitor can
+see the Suspend method_call early enough, but only if `turnOff` is written on an
+already-open websocket that the system service keeps alive while console-mode is
+on the TV.
 **LG Buddy's sleep_wake_policy is left disabled.** When enabled it restores the
 TV after every wake — including keyboard — which fights desk-mode resume. Its
 `power off` path also skips when it has no screen-ownership marker. Console-mode
-therefore sends `ssap://system/turnOff` itself from the NM hook, and only powers
-the TV back on when entering console mode.
-**A running Steam ignores `-gamepadui`.** Worse, closing the Big Picture window
+therefore sends `ssap://system/turnOff` itself from the Suspend watcher, and
+only powers the TV back on when entering console mode.**A running Steam ignores `-gamepadui`.** Worse, closing the Big Picture window
 leaves Steam alive with no window at all, so relaunching does nothing visible.
 `steam steam://open/bigpicture` is what reopens it. Big Picture also maps as an
 ordinary 1600x1000 tile, hence the fullscreen window rule.

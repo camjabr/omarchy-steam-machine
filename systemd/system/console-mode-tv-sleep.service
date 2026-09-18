@@ -1,0 +1,17 @@
+[Unit]
+Description=Power off the TV before logind Suspend tears down the network
+Documentation=https://github.com/camjabr/omarchy-steam-machine
+After=network-online.target dbus.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+# LG Buddy's venv has websockets; keep an authenticated SSAP session open while
+# console-mode is on the TV so Suspend only has to write turnOff — a cold
+# connect loses to NetworkManager in the same second.
+ExecStart=/usr/bin/LG_Buddy_PIP/bin/python /usr/local/lib/console-mode/tv-sleep-monitor.py
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

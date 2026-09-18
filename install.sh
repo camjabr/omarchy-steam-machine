@@ -19,6 +19,8 @@ HOOK_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/omarchy/hooks/post-boot.d"
 SHELL_JSON="${XDG_CONFIG_HOME:-$HOME/.config}/omarchy/shell.json"
 UDEV_RULE=/etc/udev/rules.d/90-steam-controller-wake.rules
 NM_PRE_DOWN=/etc/NetworkManager/dispatcher.d/pre-down.d/console-mode-tv-off
+TV_SLEEP_MONITOR=/usr/local/lib/console-mode/tv-sleep-monitor.py
+TV_SLEEP_SERVICE=/etc/systemd/system/console-mode-tv-sleep.service
 
 passwordless=false
 skip_udev=false
@@ -137,13 +139,29 @@ else
     note "$(basename "$dir") ($(cat "$dir/product" 2>/dev/null)): wakeup=$(cat "$dir/power/wakeup" 2>/dev/null)"
   done
 
-  step "Installing NetworkManager pre-down hook (needs sudo)"
-  # Synchronous: NM waits for this before tearing the interface down, which is
-  # the only window where SSAP can still reach the TV during sleep prep.
+  step "Installing NetworkManager pre-down stub (needs sudo)"
+  # Wi-Fi clears routes before pre-down runs on this machine; real sleep
+  # power-off is the system tv-sleep-monitor below. Keep the stub so an older
+  # install is overwritten and does not log confusing failures.
   sudo install -d -m 755 /etc/NetworkManager/dispatcher.d/pre-down.d
   sudo install -m 755 -o root -g root \
     "$REPO/networkmanager/pre-down.d/console-mode-tv-off" "$NM_PRE_DOWN"
-  note "installed $NM_PRE_DOWN"
+  note "installed $NM_PRE_DOWN (no-op stub)"
+
+  step "Installing system Suspend watcher (needs sudo)"
+  # BecomeMonitor sees the Suspend method_call before PrepareForSleep / NM
+  # teardown. A pre-warmed SSAP socket is required: cold connect loses the race.
+  sudo install -d -m 755 /usr/local/lib/console-mode
+  sudo install -m 644 -o root -g root \
+    "$REPO/systemd/system/console-mode-tv-sleep.py" "$TV_SLEEP_MONITOR"
+  sudo install -m 644 -o root -g root \
+    "$REPO/systemd/system/console-mode-tv-sleep.service" "$TV_SLEEP_SERVICE"
+  # Drop the old bash monitor if present from an earlier install.
+  sudo rm -f /usr/local/lib/console-mode/tv-sleep-monitor
+  sudo systemctl daemon-reload
+  sudo systemctl enable --now console-mode-tv-sleep.service
+  sudo systemctl restart console-mode-tv-sleep.service
+  note "console-mode-tv-sleep.service: $(systemctl is-active console-mode-tv-sleep.service)"
 fi
 
 # --- service -----------------------------------------------------------------
