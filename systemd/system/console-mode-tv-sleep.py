@@ -135,6 +135,9 @@ class LiveTv:
             self._next_id += 1
             rid = f"off_{self._next_id}"
             try:
+                # Fire-and-forget: the panel starts powering off as soon as the
+                # frame is written. Waiting for a reply races the keep-alive
+                # ping's recv and often loses the socket as the TV drops.
                 await self._ws.send(
                     json.dumps(
                         {
@@ -144,38 +147,36 @@ class LiveTv:
                         }
                     )
                 )
-                while True:
-                    reply = json.loads(await asyncio.wait_for(self._ws.recv(), timeout=3))
-                    if reply.get("id") == rid:
-                        LOG.info("turnOff reply for %s: %s", self.user, reply.get("type"))
-                        return reply.get("type") != "error"
+                LOG.info("turnOff sent for %s", self.user)
+                return True
             except Exception as exc:  # noqa: BLE001
                 LOG.error("turnOff on live socket failed for %s: %s", self.user, exc)
                 await self.close()
                 return False
 
     async def ping(self) -> None:
-        if self._ws is None:
-            return
-        self._next_id += 1
-        rid = f"ping_{self._next_id}"
-        try:
-            await self._ws.send(
-                json.dumps(
-                    {
-                        "type": "request",
-                        "id": rid,
-                        "uri": "ssap://com.webos.service.tvpower/power/getPowerState",
-                    }
+        async with self._lock:
+            if self._ws is None:
+                return
+            self._next_id += 1
+            rid = f"ping_{self._next_id}"
+            try:
+                await self._ws.send(
+                    json.dumps(
+                        {
+                            "type": "request",
+                            "id": rid,
+                            "uri": "ssap://com.webos.service.tvpower/power/getPowerState",
+                        }
+                    )
                 )
-            )
-            while True:
-                reply = json.loads(await asyncio.wait_for(self._ws.recv(), timeout=5))
-                if reply.get("id") == rid:
-                    return
-        except Exception as exc:  # noqa: BLE001
-            LOG.warning("SSAP ping failed for %s: %s", self.user, exc)
-            await self.close()
+                while True:
+                    reply = json.loads(await asyncio.wait_for(self._ws.recv(), timeout=5))
+                    if reply.get("id") == rid:
+                        return
+            except Exception as exc:  # noqa: BLE001
+                LOG.warning("SSAP ping failed for %s: %s", self.user, exc)
+                await self.close()
 
 
 class Agent:
