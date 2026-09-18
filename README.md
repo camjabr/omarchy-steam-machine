@@ -12,7 +12,7 @@ Built for a specific setup, but the hardware specifics live in a config file.
 
 | Trigger | Behaviour |
 | --- | --- |
-| Steam button while suspended | Wake, TV on, display and audio to TV, Big Picture |
+| Steam button while suspended | Wake, TV on, display and audio to TV, Big Picture (gamescope when enabled) |
 | Keyboard / mouse / power button while on the TV | Wake to the desk monitor, TV off |
 | Sleep while on the TV | TV powered off before suspend |
 | `SUPER + M` | Toggle desk monitor / TV, audio follows |
@@ -29,6 +29,8 @@ Optional but expected:
   control. Without it the display toggle still works but the TV is never
   powered on or switched.
 - **Steam**, for Big Picture.
+- **gamescope** (optional), when `CONSOLE_GAMESCOPE=1` — nests Steam on the TV
+  with `--hdr-enabled` so HDR games work without Hyprland washing out the UI.
 - **Omarchy**, for notifications, the idle-policy toggle, and the post-boot
   hook. Each is skipped gracefully if absent.
 - A Python with the `websockets` module, used to read the TV's real power
@@ -130,10 +132,24 @@ on the TV.
 TV after every wake — including keyboard — which fights desk-mode resume. Its
 `power off` path also skips when it has no screen-ownership marker. Console-mode
 therefore sends `ssap://system/turnOff` itself from the Suspend watcher, and
-only powers the TV back on when entering console mode.**A running Steam ignores `-gamepadui`.** Worse, closing the Big Picture window
+only powers the TV back on when entering console mode.
+
+**gamescope owns TV HDR when enabled.** Hyprland HDR on the C1 tone-maps SDR
+UI (Big Picture, SDR games) into PQ and often looks washed out. With
+`CONSOLE_GAMESCOPE=1`, console mode launches `gamescope --hdr-enabled -- steam
+-gamepadui` on the TV instead. Set `CONSOLE_GAMESCOPE=0` for classic Big
+Picture. Full rollback to “SDR TV, no gamescope”:
+
+1. `CONSOLE_GAMESCOPE=0` in `~/.config/console-mode/config.env`
+2. In `~/.config/hypr/monitors.lua`, set the TV (`DP-1`) to `cm = "srgb"` and
+   remove `bitdepth` / `sdr*` HDR fields
+3. `hyprctl reload`
+
+**A running Steam ignores `-gamepadui`.** Worse, closing the Big Picture window
 leaves Steam alive with no window at all, so relaunching does nothing visible.
 `steam steam://open/bigpicture` is what reopens it. Big Picture also maps as an
-ordinary 1600x1000 tile, hence the fullscreen window rule.
+ordinary 1600x1000 tile, hence the fullscreen window rule. The gamescope path
+shuts Steam down first so it can restart inside the nest.
 
 **Idle policy follows the display.** Gamepad input does not reliably register
 as desktop activity, so TV mode sets Omarchy's stay-awake and desk mode

@@ -1,18 +1,131 @@
 #!/bin/bash
 
-# Open Steam Big Picture, leaving the display setup alone.
+# Open Steam Big Picture (optionally inside gamescope for HDR).
+#
+# CONSOLE_GAMESCOPE=1 in ~/.config/console-mode/config.env wraps Steam in
+# gamescope with --hdr-enabled so the TV HDR pipe is owned by gamescope
+# instead of Hyprland tone-mapping the Steam UI.
+#
+# Rollback to classic Big Picture: set CONSOLE_GAMESCOPE=0 (and optionally
+# put the TV back to SDR in monitors.lua — see README).
 
 set -uo pipefail
 
-# A Steam that is already running ignores -gamepadui, and closing the Big
-# Picture window leaves Steam alive with no window at all, so relaunching does
-# nothing visible. The URL handler is what reopens it.
-if pgrep -x steam >/dev/null 2>&1; then
-  steam steam://open/bigpicture >/dev/null 2>&1 &
-elif command -v uwsm-app >/dev/null 2>&1; then
-  uwsm-app -- steam -gamepadui >/dev/null 2>&1 &
+CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}/console-mode/config.env"
+if [[ -r $CONFIG ]]; then
+  # shellcheck source=/dev/null
+  source "$CONFIG"
+fi
+
+TV_OUTPUT="${TV_OUTPUT:-DP-1}"
+DESK_OUTPUT="${DESK_OUTPUT:-DP-2}"
+CONSOLE_GAMESCOPE="${CONSOLE_GAMESCOPE:-0}"
+CONSOLE_GAMESCOPE_EVERYWHERE="${CONSOLE_GAMESCOPE_EVERYWHERE:-0}"
+
+log() {
+  printf '%s\n' "$*" >&2
+}
+
+want_gamescope() {
+  [[ $CONSOLE_GAMESCOPE == 1 ]] || return 1
+  command -v gamescope >/dev/null 2>&1 || {
+    log "CONSOLE_GAMESCOPE=1 but gamescope is not installed; using classic Big Picture"
+    return 1
+  }
+  if [[ $CONSOLE_GAMESCOPE_EVERYWHERE == 1 ]]; then
+    return 0
+  fi
+  # Default: only on the TV, where Hyprland HDR was washing out the UI.
+  [[ $(toggle-monitor mode 2>/dev/null) == tv ]]
+}
+
+steam_running() {
+  pgrep -x steam >/dev/null 2>&1
+}
+
+gamescope_steam_running() {
+  pgrep -f 'gamescope.*steam' >/dev/null 2>&1
+}
+
+shutdown_steam() {
+  steam_running || return 0
+  log "stopping Steam so it can restart inside gamescope"
+  steam -shutdown >/dev/null 2>&1 || true
+  local i
+  for i in $(seq 40); do
+    steam_running || return 0
+    sleep 0.25
+  done
+  log "Steam did not exit cleanly; leaving it alone"
+  return 1
+}
+
+launch_classic() {
+  # A Steam that is already running ignores -gamepadui, and closing the Big
+  # Picture window leaves Steam alive with no window at all, so relaunching does
+  # nothing visible. The URL handler is what reopens it.
+  if steam_running; then
+    steam steam://open/bigpicture >/dev/null 2>&1 &
+  elif command -v uwsm-app >/dev/null 2>&1; then
+    uwsm-app -- steam -gamepadui >/dev/null 2>&1 &
+  else
+    steam -gamepadui >/dev/null 2>&1 &
+  fi
+}
+
+launch_gamescope() {
+  if gamescope_steam_running; then
+    log "gamescope Steam session already running"
+    hyprctl dispatch focuswindow "class:gamescope" >/dev/null 2>&1 || true
+    return 0
+  fi
+
+  shutdown_steam || return 1
+
+  local width height refresh prefer
+  if [[ $(toggle-monitor mode 2>/dev/null) == tv ]]; then
+    width="${GAMESCOPE_WIDTH:-3840}"
+    height="${GAMESCOPE_HEIGHT:-2160}"
+    refresh="${GAMESCOPE_REFRESH:-120}"
+    prefer="${TV_OUTPUT}"
+  else
+    width="${GAMESCOPE_WIDTH:-3840}"
+    height="${GAMESCOPE_HEIGHT:-2160}"
+    refresh="${GAMESCOPE_REFRESH_DESK:-240}"
+    prefer="${DESK_OUTPUT}"
+  fi
+
+  local sdr_nits="${GAMESCOPE_SDR_NITS:-203}"
+
+  # ENABLE_GAMESCOPE_WSI: Proton/Vulkan clients need the gamescope WSI layer
+  # for HDR swapchains. -e: Steam integration. -f: fullscreen nest host window.
+  local -a args=(
+    -f
+    -e
+    -b
+    -W "$width"
+    -H "$height"
+    -r "$refresh"
+    -O "$prefer"
+    --adaptive-sync
+    --force-grab-cursor
+    --force-windows-fullscreen
+    --hdr-enabled
+    --hdr-sdr-content-nits "$sdr_nits"
+  )
+
+  log "starting gamescope HDR session (${width}x${height}@${refresh} on $prefer)"
+  if command -v uwsm-app >/dev/null 2>&1; then
+    ENABLE_GAMESCOPE_WSI=1 uwsm-app -- gamescope "${args[@]}" -- steam -gamepadui >/dev/null 2>&1 &
+  else
+    ENABLE_GAMESCOPE_WSI=1 gamescope "${args[@]}" -- steam -gamepadui >/dev/null 2>&1 &
+  fi
+}
+
+if want_gamescope; then
+  launch_gamescope
 else
-  steam -gamepadui >/dev/null 2>&1 &
+  launch_classic
 fi
 
 exit 0
